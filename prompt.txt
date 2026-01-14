@@ -1,0 +1,91 @@
+
+1. Summarize the feature embedding part in TabICL and TabPFN.
+
+Generally, it convert the categorical data using ordinalEncoder, 
+and take no matter numerical data and converted categorical data as the numerical value
+(is there preprocessing ? like standardization or normalization ? plz check)
+
+Then, this value will go through a unified linear mapping layer into a feature embedding.
+like f(x) = Wx + b and x is the value of 1,2,4. scalar value.
+
+This is the background.
+
+
+2. You give a very correct summary. 
+In some extent, we agree with the method in TabICL, which applied a column-wise module, 
+to learn the value in the column and refine the initial coarse-grained feature embedding. 
+Because through the transform which aggregate the "context" in the column, the feature embedding can more accuratly represent the meaning.
+
+But now, I'm wondering in these column-wise module, can we distinguish the different data type.
+The numerical value and the categorical value.
+
+Follow our current method, value are convert to numerical and go through a unified linear / also a unified column-wise module.
+We don't distinguish the different data types in this process.
+
+Let's think back to the meaning of numerical / categorical. 
+
+For categorical, it seems ok. Because for categorical data within one column, 
+the model just need to identify two different value is enough. and in row-wise, the model can learn the correlation between features.
+
+For numerical data, in this processing. The <Partially Order Relationship> is broken in this part of encoding.
+for example, feature_1: 2000 feature_2: 4000. Go through f(x) = W(x) + b.
+The final embedding f(2000) and f(4000) will not maintain the original order relationship (check this statement).
+
+So, in column-wise module, we want to explicitly add this relationship in feature embedding for categorical data.
+
+
+3.
+Yes, our target is to explicitly add the <Partially Order Relationship> in the column-wise module.
+
+Consider the transformer is the main module in column-wise module, we think about the RoPE the relative position encoding.
+
+However, there we consider the value as the position. we still take embedding via the unified-linear mapping as the initial feature embedding.
+
+When go through the column-wise module, for numerical data, we consider its value as the position.
+
+In the attention weight calculation, we add the relative position encoding to explicitly add the partial order relationship.
+
+From the high-level perspective in in-context learning. 
+We need quantify the similarities between numerical features. An intuitive motivation is the x1(col1) = 1 x2(col1) = 1.2 x3(col1) = 3
+There the relative position in 1 and 1.2 is closer than 1 and 3. So the x1 should have a higher similarity to x2. Especially in-context learning.
+The model simulate the train instance to inference the test instance. 
+
+This is my proposed direction. can you give a evaluation about the correctness.
+
+
+4. help me summarize our conversation in to a markdown note.
+
+first, we need to clarify why we have this problem(the motivation)
+
+then, current tabular foundation model's solution.
+
+why ? the limitation.
+
+And our research proposal. 
+
+give some short evaluation. (better to keep the theoretical correctness)
+
+
+5.
+
+- Better give a simple example how tabular models encoding these two types of data (numerical & categorical)
+- Need a prove that following current method to encode data, the model can only distinguish different value,
+the partial order relationship can not keeped in the feature embedding (better seriously theoretical prove).
+- Use TabICL as example, tabPFN has no column-wise module, which column-wise module is applied in duel-transformer
+- Why order matters for in-context learning place after we introduced the background / motivations
+- The method don't use Rank-based(which lead to argsort operation, is expensive) remove this part, just use the normalization based method / Don't need Implementation Sketch, there we only care about proposal.
+- Q2: Does this conflict with Set Transformer's permutation invariance ? 
+I don't think we should consider it as a position encoding, it's a inductive bias added explicitly for the partial order relationship.
+The model can distinguish the initial embedding, can also from this encoding to learn the proximately relationship between numerical features.
+
+
+
+6.
+
+- all equation or math signal use the latex math equation, in proof, try to avoid the text description and keep clean.
+
+- There is some duplicated introduction in TabICL in current feature encoding.
+
+- In why order matters for in-context learning, try to avoid too much introduction and examples, keep straightforward and clean. Just formal justification.
+
+-
