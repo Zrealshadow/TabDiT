@@ -164,22 +164,21 @@ class TabularDiffusion(nn.Module):
             )
 
         # Decoder
+        # Note: Decoder doesn't need d_context or max_features
+        # Skip from Row Encoder already has feature position embedding
         if config.use_simple_decoder:
             self.decoder = SimpleDecoder(
                 d_model=config.d_model,
                 d_context=self.d_context,
                 num_cls_tokens=config.num_cls_tokens,
-                max_features=config.max_features,
             )
         else:
             self.decoder = Decoder(
                 d_model=config.d_model,
-                d_context=self.d_context,
                 num_cls_tokens=config.num_cls_tokens,
                 num_blocks=config.decoder_blocks,
                 num_heads=config.decoder_heads,
                 dim_feedforward=dim_ff_decoder,
-                max_features=config.max_features,
                 dropout=config.dropout,
             )
 

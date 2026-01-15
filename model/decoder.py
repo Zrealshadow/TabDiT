@@ -101,36 +101,30 @@ class Decoder(nn.Module):
     Combines skip connection features with CLS context via cross-attention
     to reconstruct the full feature tensor.
 
+    Note: No feature position embedding here - skip from Row Encoder
+    already has FeaturePositionalEmbedding baked in.
+
     Args:
         d_model: Feature embedding dimension
-        d_context: CLS context dimension (num_cls * d_model)
-        num_cls_tokens: Number of CLS tokens
         num_blocks: Number of decoder blocks
         num_heads: Number of attention heads
         dim_feedforward: FFN hidden dimension
-        max_features: Maximum number of features (for position embedding)
         dropout: Dropout rate
     """
 
     def __init__(
         self,
         d_model: int = 128,
-        d_context: int = 512,
-        num_cls_tokens: int = 4,
         num_blocks: int = 3,
         num_heads: int = 4,
         dim_feedforward: int = 256,
-        max_features: int = 200,
         dropout: float = 0.0,
     ):
         super().__init__()
         self.d_model = d_model
-        self.num_cls_tokens = num_cls_tokens
 
-        # Feature position embedding (handles variable C)
-        self.feature_pos_embed = nn.Parameter(
-            torch.randn(max_features, d_model) * 0.02
-        )
+        # Note: No feature position embedding here
+        # Skip from Row Encoder already has FeaturePositionalEmbedding baked in
 
         # Decoder blocks
         self.blocks = nn.ModuleList([
@@ -144,7 +138,6 @@ class Decoder(nn.Module):
         ])
 
         # Output projection: embedding -> scalar
-        self.out_norm = nn.LayerNorm(d_model)
         self.out_proj = nn.Linear(d_model, 1)
 
     def forward(
@@ -161,30 +154,31 @@ class Decoder(nn.Module):
             Reconstructed features [B, N, C]
         """
         B, N, C, D = skip.shape
-        K = self.num_cls_tokens
 
-        # 1. Add feature position embeddings to skip connection
-        feat_pos = self.feature_pos_embed[:C]  # [C, D]
-        skip = skip + feat_pos.unsqueeze(0).unsqueeze(0)  # [B, N, C, D]
+        # Skip already has feature position embedding from Row Encoder
 
-        # 2. Reshape context from [B, N, K*D] to [B, N, K, D]
+        # Derive K from context shape
+        Z = context.shape[-1]
+        assert Z % D == 0, f"Context dim {Z} must be divisible by d_model {D}"
+        K = Z // D
+
+        # 1. Reshape context from [B, N, K*D] to [B, N, K, D]
         context = context.view(B, N, K, D)
 
-        # 3. Flatten batch and row dimensions for attention
+        # 2. Flatten batch and row dimensions for attention
         skip_flat = skip.view(B * N, C, D)        # [B*N, C, D]
         context_flat = context.view(B * N, K, D)  # [B*N, K, D]
 
-        # 4. Apply decoder blocks
+        # 3. Apply decoder blocks
         h = skip_flat
         for block in self.blocks:
             h = block(h, context_flat)
 
-        # 5. Output projection
-        h = self.out_norm(h)      # [B*N, C, D]
+        # 4. Output projection
         h = self.out_proj(h)      # [B*N, C, 1]
         h = h.squeeze(-1)         # [B*N, C]
 
-        # 6. Reshape back to [B, N, C]
+        # 5. Reshape back to [B, N, C]
         output = h.view(B, N, C)
 
         return output
@@ -197,33 +191,25 @@ class SimpleDecoder(nn.Module):
     Uses additive fusion of context and skip features,
     followed by MLP projection.
 
+    Note: No feature position embedding here - skip from Row Encoder
+    already has FeaturePositionalEmbedding baked in.
+
     Args:
         d_model: Feature embedding dimension
-        d_context: CLS context dimension
-        num_cls_tokens: Number of CLS tokens
-        max_features: Maximum number of features
         hidden_mult: MLP hidden dimension multiplier
     """
 
     def __init__(
         self,
         d_model: int = 128,
-        d_context: int = 512,
-        num_cls_tokens: int = 4,
-        max_features: int = 200,
         hidden_mult: int = 2,
     ):
         super().__init__()
         self.d_model = d_model
-        self.num_cls_tokens = num_cls_tokens
 
-        # Feature position embedding
-        self.feature_pos_embed = nn.Parameter(
-            torch.randn(max_features, d_model) * 0.02
-        )
-
-        # Context projection: broadcast CLS to features
-        self.context_proj = nn.Linear(d_context, d_model)
+        # Context projection will be created lazily or we project from any dim
+        self.context_proj = None  # Created on first forward
+        self.hidden_mult = hidden_mult
 
         # Fusion MLP
         self.fusion = nn.Sequential(
@@ -250,23 +236,19 @@ class SimpleDecoder(nn.Module):
         Returns:
             Reconstructed features [B, N, C]
         """
-        B, N, C, D = skip.shape
+        C = skip.shape[2]
 
-        # 1. Add feature position embeddings
-        feat_pos = self.feature_pos_embed[:C]
-        skip = skip + feat_pos.unsqueeze(0).unsqueeze(0)
-
-        # 2. Project context and broadcast to all features
+        # 1. Project context and broadcast to all features
         ctx = self.context_proj(context)  # [B, N, D]
         ctx = ctx.unsqueeze(2).expand(-1, -1, C, -1)  # [B, N, C, D]
 
-        # 3. Additive fusion
+        # 2. Additive fusion (skip already has position embedding)
         h = skip + ctx
 
-        # 4. MLP processing
+        # 3. MLP processing
         h = self.fusion(h)  # [B, N, C, D]
 
-        # 5. Output projection
+        # 4. Output projection
         output = self.out_proj(h).squeeze(-1)  # [B, N, C]
 
         return output

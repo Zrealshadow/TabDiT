@@ -12,12 +12,15 @@ from typing import Optional
 from .components import TimestepEmbedder
 
 
-class DiffusionTransformerBlock(nn.Module):
+class DiTBlockWithAdaLNZero(nn.Module):
     """
-    Single transformer block for diffusion.
+    DiT block with Adaptive Layer Normalization Zero (adaLN-Zero).
 
-    Standard transformer block with optional cross-attention
-    for conditioning (not used in unconditional diffusion).
+    Uses timestep-conditioned modulation parameters (scale, shift, gate)
+    to adaptively normalize activations. The "Zero" refers to initializing
+    gates to zero so the block initially acts as identity.
+
+    Reference: "Scalable Diffusion Models with Transformers" (DiT paper)
 
     Args:
         d_model: Model dimension
@@ -55,10 +58,16 @@ class DiffusionTransformerBlock(nn.Module):
         self.norm2 = nn.LayerNorm(d_model)
 
         # Adaptive LayerNorm for timestep conditioning (DiT-style)
+        # Outputs: [shift_msa, scale_msa, gate_msa, shift_ffn, scale_ffn, gate_ffn]
         self.adaLN_modulation = nn.Sequential(
             nn.SiLU(),
             nn.Linear(d_model, 6 * d_model),
         )
+
+        # Zero initialization for gates (adaLN-Zero)
+        # This makes the block act as identity at initialization
+        nn.init.zeros_(self.adaLN_modulation[1].weight)
+        nn.init.zeros_(self.adaLN_modulation[1].bias)
 
     def forward(
         self,
@@ -139,7 +148,7 @@ class DiffusionTransformer(nn.Module):
 
         # Transformer blocks
         self.blocks = nn.ModuleList([
-            DiffusionTransformerBlock(
+            DiTBlockWithAdaLNZero(
                 d_model=d_model,
                 num_heads=num_heads,
                 dim_feedforward=dim_feedforward,
@@ -151,11 +160,15 @@ class DiffusionTransformer(nn.Module):
         # Final layer normalization
         self.out_norm = nn.LayerNorm(d_model)
 
-        # Final modulation
+        # Final modulation (shift, scale only)
         self.final_adaLN = nn.Sequential(
             nn.SiLU(),
             nn.Linear(d_model, 2 * d_model),
         )
+
+        # Zero initialization for final modulation
+        nn.init.zeros_(self.final_adaLN[1].weight)
+        nn.init.zeros_(self.final_adaLN[1].bias)
 
     def forward(
         self,
