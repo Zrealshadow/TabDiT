@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from .column_encoder import ColumnEncoder, SimpleColumnEncoder
 from .row_encoder import RowEncoder, RowEncoderNoCLS
 from .diffusion_transformer import DiffusionTransformer, SimpleDiffusionTransformer
-from .decoder import Decoder, SimpleDecoder
+from .decoder import Decoder
 
 
 @dataclass
@@ -37,6 +37,7 @@ class TabularDiffusionConfig:
     # Stage 2: Row Encoder
     row_blocks: int = 3
     row_heads: int = 8
+    position_encoding: str = "subspace"  # "subspace" or "rope"
     rope_base: float = 100000.0
 
     # Stage 3: Diffusion Transformer
@@ -58,7 +59,6 @@ class TabularDiffusionConfig:
     # Architecture variants
     use_simple_column_encoder: bool = False
     use_simple_diffusion: bool = False
-    use_simple_decoder: bool = False
 
 
 class TabularDiffusion(nn.Module):
@@ -140,6 +140,7 @@ class TabularDiffusion(nn.Module):
             dim_feedforward=dim_ff_row,
             dropout=config.dropout,
             max_features=config.max_features,
+            position_encoding=config.position_encoding,
             rope_base=config.rope_base,
         )
 
@@ -166,21 +167,13 @@ class TabularDiffusion(nn.Module):
         # Decoder
         # Note: Decoder doesn't need d_context or max_features
         # Skip from Row Encoder already has feature position embedding
-        if config.use_simple_decoder:
-            self.decoder = SimpleDecoder(
-                d_model=config.d_model,
-                d_context=self.d_context,
-                num_cls_tokens=config.num_cls_tokens,
-            )
-        else:
-            self.decoder = Decoder(
-                d_model=config.d_model,
-                num_cls_tokens=config.num_cls_tokens,
-                num_blocks=config.decoder_blocks,
-                num_heads=config.decoder_heads,
-                dim_feedforward=dim_ff_decoder,
-                dropout=config.dropout,
-            )
+        self.decoder = Decoder(
+            d_model=config.d_model,
+            num_blocks=config.decoder_blocks,
+            num_heads=config.decoder_heads,
+            dim_feedforward=dim_ff_decoder,
+            dropout=config.dropout,
+        )
 
     def forward(
         self,

@@ -5,8 +5,8 @@ description = "Unconditional diffusion model for tabular data generation"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "torch>=2.0.0",
-    "numpy>=1.24.0",
+    "torch==2.2.0",
+    "numpy<2",
     "tqdm>=4.65.0",
     "einops>=0.7.0",
 ]
@@ -25,3 +25,8 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

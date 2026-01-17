@@ -13,7 +13,7 @@ from .tabular_diffusion import (
 from .column_encoder import ColumnEncoder, SimpleColumnEncoder
 from .row_encoder import RowEncoder, RowEncoderNoCLS
 from .diffusion_transformer import DiffusionTransformer, SimpleDiffusionTransformer
-from .decoder import Decoder, SimpleDecoder
+from .decoder import Decoder
 
 __all__ = [
     # Main models
@@ -30,5 +30,4 @@ __all__ = [
     "SimpleDiffusionTransformer",
     # Decoder
     "Decoder",
-    "SimpleDecoder",
 ]

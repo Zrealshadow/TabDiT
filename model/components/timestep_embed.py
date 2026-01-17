@@ -29,7 +29,8 @@ class SinusoidalTimestepEmbedding(nn.Module):
         super().__init__()
         self.d_embed = d_embed
         self.max_timesteps = max_timesteps
-
+        self.max_period = 10000
+        # max_period: controls the minimum frequency of the embeddings
         # Precompute embedding table
         self._build_embedding_table()
 
@@ -39,7 +40,7 @@ class SinusoidalTimestepEmbedding(nn.Module):
 
         # Frequency scaling
         freqs = torch.exp(
-            -math.log(10000) * torch.arange(half_dim).float() / half_dim
+            -math.log(self.max_period) * torch.arange(half_dim).float() / half_dim
         )
 
         # Timestep positions

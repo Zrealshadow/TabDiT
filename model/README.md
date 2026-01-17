@@ -29,28 +29,26 @@ Input: X_noisy [B, N, C] + timestep t
 │  • Output: [B, N, C, D]                                     │
 └─────────────────────┬───────────────────────────────────────┘
                       │
-                      ├──────────────────────────┐
-                      ▼                          │ skip connection
-┌─────────────────────────────────────────┐     │
-│  Stage 2: Row-wise Interaction          │     │
-│  (RowEncoder)                           │     │
-│  ─────────────────────────────────────  │     │
-│  • Prepend CLS tokens [B, N, C+K, D]    │     │
-│  • RoPE Transformer encoder             │     │
-│  • Extract CLS: [B, N, K, D]            │     │
-│  • Flatten: [B, N, K*D]                 │     │
-└─────────────────────┬───────────────────┘     │
-                      │                          │
-                      ▼                          │
-┌─────────────────────────────────────────┐     │
-│  Stage 3: Diffusion Transformer         │     │
-│  ─────────────────────────────────────  │     │
-│  • Add timestep embedding               │     │
-│  • Self-attention transformer           │     │
-│  • Output: [B, N, K*D]                  │     │
-└─────────────────────┬───────────────────┘     │
-                      │                          │
-                      ▼                          ▼
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Stage 2: Row-wise Interaction (RowEncoder)                 │
+│  ─────────────────────────────────────────────────────────  │
+│  • Prepend CLS tokens [B, N, K+C, D]                        │
+│  • Transformer encoder (subspace or RoPE position encoding) │
+│  • Extract CLS: [B, N, K, D] → flatten: [B, N, K*D]         │
+│  • Extract features: [B, N, C, D] (skip connection)         │
+└───────────┬─────────────────────────────────┬───────────────┘
+            │ CLS [B, N, K*D]                  │ skip [B, N, C, D]
+            ▼                                  │
+┌─────────────────────────────────────────┐   │
+│  Stage 3: Diffusion Transformer         │   │
+│  ─────────────────────────────────────  │   │
+│  • Add timestep embedding (adaLN-Zero)  │   │
+│  • Self-attention transformer           │   │
+│  • Output: [B, N, K*D]                  │   │
+└─────────────────────┬───────────────────┘   │
+                      │                        │
+                      ▼                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Decoder: Feature Reconstruction                             │
 │  ─────────────────────────────────────────────────────────  │
