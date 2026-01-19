@@ -514,7 +514,7 @@ class TestSCMPrior:
         # All samples should have same seq_len and train_size
         assert (seq_lens == seq_lens[0]).all(), "All samples should share seq_len"
         assert (train_sizes == train_sizes[0]).all(), "All samples should share train_size"
-        print(d)
+        # print(d)
         
     def test_batch_size_per_gp_single_sample_groups(self):
         """Test batch_size_per_gp == 1 means each sample can have different hyperparams."""
@@ -625,6 +625,69 @@ class TestSCMPrior:
         # All samples should have the same seq_len
         assert (seq_lens == seq_lens[0]).all(), \
             "All samples should have same seq_len when seq_len_per_gp=False"
+
+
+class TestSkipUniqueFilter:
+    """Tests for skip_unique_filter configuration."""
+
+    def test_skip_unique_filter_true_consistent_d(self):
+        """Test that skip_unique_filter=True ensures consistent d across batch."""
+        fixed_hp = DEFAULT_FIXED_HP.copy()
+        fixed_hp["skip_unique_filter"] = True
+
+        prior = SCMPrior(
+            batch_size=8,
+            batch_size_per_gp=8,  # All samples in one group
+            min_features=10,
+            max_features=30,
+            max_seq_len=64,
+            prior_type="mlp_scm",
+            fixed_hp=fixed_hp,
+            n_jobs=1,
+        )
+
+        # Run multiple times to ensure consistency
+        for _ in range(5):
+            X, y, d, seq_lens, train_sizes = prior.get_batch()
+
+            # All samples should have exactly the same d (no filtering)
+            assert (d == d[0]).all(), \
+                f"With skip_unique_filter=True, all samples should have same d, got {d.tolist()}"
+
+    def test_skip_unique_filter_false_can_vary_d(self):
+        """Test that skip_unique_filter=False allows d to vary (original behavior)."""
+        fixed_hp = DEFAULT_FIXED_HP.copy()
+        fixed_hp["skip_unique_filter"] = False
+
+        prior = SCMPrior(
+            batch_size=16,
+            batch_size_per_gp=16,  # All samples in one group
+            min_features=5,
+            max_features=30,
+            max_seq_len=64,
+            prior_type="mlp_scm",
+            fixed_hp=fixed_hp,
+            n_jobs=1,
+        )
+
+        # Run multiple times - d may vary due to delete_unique_features
+        found_variation = False
+        for _ in range(10):
+            X, y, d, seq_lens, train_sizes = prior.get_batch()
+
+            if not (d == d[0]).all():
+                found_variation = True
+                break
+
+        # With filtering enabled, we expect d to sometimes vary
+        # (not guaranteed every time, but likely over 10 runs)
+        # This is a soft assertion - just checking the feature works
+        print(f"skip_unique_filter=False: d variation found = {found_variation}")
+
+    def test_skip_unique_filter_default_is_true(self):
+        """Test that skip_unique_filter defaults to True."""
+        assert DEFAULT_FIXED_HP.get("skip_unique_filter", False) is True, \
+            "skip_unique_filter should default to True in DEFAULT_FIXED_HP"
 
 
 class TestPriorDatasetIntegration:

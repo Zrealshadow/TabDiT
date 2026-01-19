@@ -3,6 +3,7 @@ from .activations import get_activations
 
 DEFAULT_FIXED_HP = {
     # SCMPrior
+    "skip_unique_filter": True,  # Skip delete_unique_features to ensure consistent d across batch
     "mix_probs": (0.7, 0.3),
     # TreeSCM
     "tree_model": "xgboost",
@@ -11,7 +12,7 @@ DEFAULT_FIXED_HP = {
     # Reg2Cls
     "balanced": False,
     "multiclass_ordered_prob": 0.0,
-    "cat_prob": 0.2,
+    "cat_prob": 0.1,
     "max_categories": float("inf"),
     "scale_by_max_features": False,
     "permute_features": True,
@@ -49,8 +50,8 @@ DEFAULT_SAMPLED_HP = {
     },
     "hidden_dim": {
         "distribution": "meta_trunc_norm_log_scaled",
-        "max_mean": 130,
-        "min_mean": 5,
+        "max_mean": 256,
+        "min_mean": 32,
         "round": True,
         "lower_bound": 4,
     },

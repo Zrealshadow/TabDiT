@@ -560,7 +560,9 @@ class SCMPrior(Prior):
             d = torch.tensor([params["num_features"]], device=self.device, dtype=torch.long)
 
             # Only keep valid datasets with sufficient features and balanced classes
-            X, d = self.delete_unique_features(X, d)
+            # Optionally skip delete_unique_features to ensure consistent d across batch
+            if not params.get("skip_unique_filter", False):
+                X, d = self.delete_unique_features(X, d)
             if (d > 0).all() and self.sanity_check(X, y, params["train_size"]):
                 return X.squeeze(0), y.squeeze(0), d.squeeze(0)
 
@@ -659,7 +661,7 @@ class SCMPrior(Prior):
 
                     # Create parameters dictionary for this dataset
                     params = {
-                        **self.fixed_hp,  # Fixed HPs
+                        **self.fixed_hp,
                         "seq_len": gp_seq_len,
                         "train_size": gp_train_size,
                         # If per-gp setting, use adjusted max features for this group because we use nested tensors
