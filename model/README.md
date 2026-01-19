@@ -34,23 +34,23 @@ Input: X_noisy [B, N, C] + timestep t
 │  Stage 2: Row-wise Interaction (RowEncoder)                 │
 │  ─────────────────────────────────────────────────────────  │
 │  • Prepend CLS tokens [B, N, K+C, D]                        │
-│  • Transformer encoder (subspace or RoPE position encoding) │
+│  • Transformer encoder + subspace position encoding         │
 │  • Extract CLS: [B, N, K, D] → flatten: [B, N, K*D]         │
 │  • Extract features: [B, N, C, D] (skip connection)         │
 └───────────┬─────────────────────────────────┬───────────────┘
-            │ CLS [B, N, K*D]                  │ skip [B, N, C, D]
-            ▼                                  │
+            │ CLS [B, N, K*D]                 │ skip [B, N, C, D]
+            ▼                                 │
 ┌─────────────────────────────────────────┐   │
-│  Stage 3: Diffusion Transformer         │   │
+│  Stage 3: Diffusion Transformer  (DiT)  │   │
 │  ─────────────────────────────────────  │   │
 │  • Add timestep embedding (adaLN-Zero)  │   │
 │  • Self-attention transformer           │   │
 │  • Output: [B, N, K*D]                  │   │
 └─────────────────────┬───────────────────┘   │
-                      │                        │
-                      ▼                        ▼
+                      │                       │
+                      ▼                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Decoder: Feature Reconstruction                             │
+│  Decoder: Feature Reconstruction                            │
 │  ─────────────────────────────────────────────────────────  │
 │  • Cross-attention: skip features query CLS context         │
 │  • Self-attention: feature interactions                     │
@@ -73,17 +73,22 @@ The CLS tokens in Stage 2 compress per-feature information into a fixed-size rep
 - **Distribution awareness**: Learns column statistics across all rows
 - **Permutation invariance**: Row order doesn't affect column embeddings
 
-### Why RoPE for Rows?
+### Why Subspace Position Encoding for Rows?
 
-- **Feature position awareness**: Distinguishes feature slots
-- **Variable C support**: Generalizes to any number of features
-- **No learned parameters**: Geometric encoding
+We use **subspace mode** (additive learned embeddings) by default for row-wise attention:
+
+- **Column distinction**: Learned positional embeddings help the model distinguish different columns/features
+- **Variable C support**: Embeddings are sliced to `[:C]` for any number of features
+- **TabPFN-inspired**: Following the successful TabPFN approach for feature position encoding
+
+Alternative: RoPE (Rotary Position Encoding) is also supported but subspace is preferred for tabular data where feature identity matters more than relative position.
 
 ### Why Cross-Attention in Decoder?
 
 - **Query**: Skip features (what to reconstruct)
 - **Key/Value**: CLS context (global information)
 - Allows each feature to selectively retrieve relevant global patterns
+
 
 ## Problems to Solve
 
@@ -121,16 +126,7 @@ self.feature_pos_embed = nn.Parameter(torch.randn(C_max, D))
 feat_pos = self.feature_pos_embed[:C]  # Works for any C <= C_max
 ```
 
-### Problem 3: Diffusion on Mixed Data Types
-
-**Challenge**: Tabular data contains continuous and categorical features.
-
-**Potential Solutions**:
-1. **Unified continuous space**: Embed categoricals, diffuse in embedding space
-2. **Separate diffusion**: Different noise schedules for different types
-3. **Score matching**: Categorical-aware score functions
-
-### Problem 4: Preserving Feature Correlations
+### Problem 3: Preserving Feature Correlations
 
 **Challenge**: Generated features must maintain realistic correlations.
 
@@ -139,85 +135,49 @@ feat_pos = self.feature_pos_embed[:C]  # Works for any C <= C_max
 2. **Attention mechanisms**: Let features attend to each other
 3. **SCM training data**: Learn correlation patterns from synthetic SCM data
 
-## Module Structure
-
-```
-model/
-├── README.md                 # This file
-├── __init__.py              # Module exports
-├── column_encoder.py        # Stage 1: Column-wise embedding
-├── row_encoder.py           # Stage 2: Row-wise interaction
-├── diffusion_transformer.py # Stage 3: Diffusion with timestep
-├── decoder.py               # Feature reconstruction decoder
-├── tabular_diffusion.py     # Main model combining all stages
-└── components/
-    ├── __init__.py
-    ├── set_transformer.py   # Induced self-attention
-    ├── rope.py              # Rotary position encoding
-    └── timestep_embed.py    # Sinusoidal timestep embedding
-```
 
 ## Configuration
 
-Default hyperparameters (following TabICL):
+Default hyperparameters (from `TabularDiffusionConfig`):
 
 ```python
-config = {
+@dataclass
+class TabularDiffusionConfig:
     # Dimensions
-    "d_model": 128,              # Feature embedding dimension
-    "d_context": 512,            # CLS context dimension (num_cls * d_model)
+    d_model: int = 128              # Feature embedding dimension
+    num_cls_tokens: int = 4         # CLS tokens (d_context = num_cls * d_model)
 
     # Stage 1: Column Encoder
-    "num_inducing_points": 128,  # Set Transformer inducing points
-    "column_blocks": 3,          # Number of Set Transformer blocks
-    "column_heads": 4,
+    column_blocks: int = 3
+    column_heads: int = 4
+    num_inducing: int = 128         # Set Transformer inducing points
 
     # Stage 2: Row Encoder
-    "num_cls_tokens": 4,         # CLS tokens per row
-    "row_blocks": 3,             # Number of RoPE transformer blocks
-    "row_heads": 8,
-    "rope_base": 100000,
+    row_blocks: int = 3
+    row_heads: int = 8
+    position_encoding: str = "subspace"  # "subspace" (default) or "rope"
+    rope_base: float = 100000.0          # Only used if position_encoding="rope"
 
-    # Stage 3: Diffusion Transformer
-    "diffusion_blocks": 12,      # Number of transformer blocks
-    "diffusion_heads": 4,
+    # Stage 3: Diffusion Transformer (DiT)
+    diffusion_blocks: int = 12
+    diffusion_heads: int = 4
 
     # Decoder
-    "decoder_blocks": 3,
-    "decoder_heads": 4,
+    decoder_blocks: int = 3
+    decoder_heads: int = 4
 
     # Limits
-    "max_features": 200,         # Maximum C
-    "max_rows": 10000,           # Maximum N (soft limit)
+    max_features: int = 200         # Maximum C
+    max_timesteps: int = 1000       # Diffusion timesteps
 
-    # Diffusion
-    "timesteps": 1000,
-}
+    # General
+    dim_feedforward_mult: int = 2   # FFN hidden dim = d_model * mult
+    dropout: float = 0.0
+
+    # Architecture variants
+    use_simple_column_encoder: bool = False
+    use_simple_diffusion: bool = False
 ```
 
-## Usage
+**Note**: This model currently focuses on **numerical data only**. Categorical features should be converted to numerical values via preprocessing (e.g., label encoding, one-hot encoding) before being passed to the model.
 
-```python
-from model import TabularDiffusion
-
-# Create model
-model = TabularDiffusion(
-    d_model=128,
-    num_cls_tokens=4,
-    max_features=200,
-)
-
-# Forward pass (training)
-x_noisy = torch.randn(1, 100, 50)  # [B=1, N=100, C=50]
-t = torch.randint(0, 1000, (1,))   # timestep
-noise_pred = model(x_noisy, t)     # [1, 100, 50]
-
-# Loss
-loss = F.mse_loss(noise_pred, actual_noise)
-```
-
-## References
-
-- TabICL: [Architecture Overview](../tabICL_Architecture_Overview.md)
-- Data Generation: [SCM Overview](../TabICL_Data_Generation_Overview.md)
-- Diffusion Models: DDPM, Score-based models
