@@ -422,6 +422,16 @@ class Trainer:
 
             total_loss += loss.item()
 
+        # NaN detection - skip update if loss is NaN
+        if math.isnan(total_loss):
+            print(f"NaN loss detected at step {self.global_step + 1}! Skipping update.")
+            self.optimizer.zero_grad()
+            return {
+                "loss": float("nan"),
+                "lr": self._get_lr(),
+                "nan_skipped": True,
+            }
+
         # Gradient clipping
         if cfg.optim.max_grad_norm > 0:
             if self.scaler is not None:
@@ -570,6 +580,10 @@ class Trainer:
             # Training step
             metrics = self.train_step()
             self.global_step += 1
+
+            # Stop training if NaN detected
+            if metrics.get("nan_skipped"):
+                break
 
             log_loss += metrics["loss"]
 

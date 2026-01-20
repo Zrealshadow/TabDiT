@@ -45,7 +45,7 @@ class DiTBlockWithAdaLNZero(nn.Module):
             dropout=dropout,
             batch_first=True,
         )
-        self.norm1 = nn.LayerNorm(d_model)
+        self.norm1 = nn.LayerNorm(d_model, elementwise_affine=False, eps=1e-6)
 
         # Feed-forward
         self.ffn = nn.Sequential(
@@ -55,7 +55,7 @@ class DiTBlockWithAdaLNZero(nn.Module):
             nn.Linear(dim_feedforward, d_model),
             nn.Dropout(dropout),
         )
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model, elementwise_affine=False, eps=1e-6)
 
         # Adaptive LayerNorm for timestep conditioning (DiT-style)
         # Outputs: [shift_msa, scale_msa, gate_msa, shift_ffn, scale_ffn, gate_ffn]
@@ -158,7 +158,7 @@ class DiffusionTransformer(nn.Module):
         ])
 
         # Final layer normalization
-        self.out_norm = nn.LayerNorm(d_model)
+        self.out_norm = nn.LayerNorm(d_model,elementwise_affine=False, eps=1e-6)
 
         # Final modulation (shift, scale only)
         self.final_adaLN = nn.Sequential(
