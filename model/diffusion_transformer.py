@@ -12,6 +12,78 @@ from typing import Optional
 from .components import TimestepEmbedder
 
 
+class DiTBlockAdditive(nn.Module):
+    """
+    DiT block with simple additive timestep conditioning.
+
+    Adds timestep embedding to input before each block, like DDPM.
+    More stable than adaLN (no multiplicative modulation).
+
+    Args:
+        d_model: Model dimension
+        num_heads: Number of attention heads
+        dim_feedforward: FFN hidden dimension
+        dropout: Dropout rate
+    """
+
+    def __init__(
+        self,
+        d_model: int = 512,
+        num_heads: int = 4,
+        dim_feedforward: int = 1024,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+
+        # Self-attention
+        self.self_attn = nn.MultiheadAttention(
+            embed_dim=d_model,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.norm1 = nn.LayerNorm(d_model)
+
+        # Feed-forward
+        self.ffn = nn.Sequential(
+            nn.Linear(d_model, dim_feedforward),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, d_model),
+            nn.Dropout(dropout),
+        )
+        self.norm2 = nn.LayerNorm(d_model)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        t_embed: torch.Tensor,
+        attn_mask: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Args:
+            x: Input tensor [B, N, D]
+            t_embed: Timestep embedding [B, D]
+            attn_mask: Optional attention mask
+
+        Returns:
+            Output tensor [B, N, D]
+        """
+        # Add timestep embedding (simple additive conditioning)
+        x = x + t_embed.unsqueeze(1)  # [B, D] -> [B, 1, D]
+
+        # Self-attention
+        x_norm = self.norm1(x)
+        attn_out, _ = self.self_attn(x_norm, x_norm, x_norm, attn_mask=attn_mask)
+        x = x + attn_out
+
+        # FFN
+        x_norm = self.norm2(x)
+        x = x + self.ffn(x_norm)
+
+        return x
+
+
 class DiTBlockWithAdaLNZero(nn.Module):
     """
     DiT block with Adaptive Layer Normalization Zero (adaLN-Zero).
@@ -19,6 +91,9 @@ class DiTBlockWithAdaLNZero(nn.Module):
     Uses timestep-conditioned modulation parameters (scale, shift, gate)
     to adaptively normalize activations. The "Zero" refers to initializing
     gates to zero so the block initially acts as identity.
+
+    WARNING: This can cause NaN during training due to unbounded multiplicative
+    modulation. Consider using DiTBlockAdditive for stability.
 
     Reference: "Scalable Diffusion Models with Transformers" (DiT paper)
 
@@ -114,10 +189,10 @@ class DiTBlockWithAdaLNZero(nn.Module):
 
 class DiffusionTransformer(nn.Module):
     """
-    Diffusion Transformer (DiT-style) for tabular data.
+    Diffusion Transformer for tabular data.
 
-    Processes CLS representations with timestep conditioning
-    using adaptive layer normalization.
+    Processes CLS representations with simple additive timestep conditioning.
+    Each block adds timestep embedding to input before attention/FFN.
 
     Args:
         d_model: Model dimension (K * d_feature for CLS)
@@ -146,9 +221,9 @@ class DiffusionTransformer(nn.Module):
             max_timesteps=max_timesteps,
         )
 
-        # Transformer blocks
+        # Transformer blocks with additive conditioning
         self.blocks = nn.ModuleList([
-            DiTBlockWithAdaLNZero(
+            DiTBlockAdditive(
                 d_model=d_model,
                 num_heads=num_heads,
                 dim_feedforward=dim_feedforward,
@@ -158,17 +233,7 @@ class DiffusionTransformer(nn.Module):
         ])
 
         # Final layer normalization
-        self.out_norm = nn.LayerNorm(d_model,elementwise_affine=False, eps=1e-6)
-
-        # Final modulation (shift, scale only)
-        self.final_adaLN = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(d_model, 2 * d_model),
-        )
-
-        # Zero initialization for final modulation
-        nn.init.zeros_(self.final_adaLN[1].weight)
-        nn.init.zeros_(self.final_adaLN[1].bias)
+        self.out_norm = nn.LayerNorm(d_model)
 
     def forward(
         self,
@@ -192,12 +257,7 @@ class DiffusionTransformer(nn.Module):
         for block in self.blocks:
             x = block(x, t_embed, attn_mask)
 
-        # Final adaptive LayerNorm
-        shift, scale = self.final_adaLN(t_embed).chunk(2, dim=-1)
-        x = self.out_norm(x)
-        x = x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
-
-        return x
+        return self.out_norm(x)
 
 
 class SimpleDiffusionTransformer(nn.Module):

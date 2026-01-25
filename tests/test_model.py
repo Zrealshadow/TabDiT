@@ -206,22 +206,16 @@ class TestDiffusionTransformer:
         output = transformer(x, t)
 
         assert output.shape == (B, N, D)
-
+    
     def test_timestep_conditioning(self):
-        """Test that different timesteps produce different outputs after init."""
+        """Test that different timesteps produce different outputs."""
         transformer = DiffusionTransformer(
             d_model=256,
             num_blocks=4,
         )
 
-        # Note: With adaLN-Zero initialization, the model initially ignores timesteps.
-        # This is by design - the model learns to use timestep conditioning during training.
-        # For testing, we need non-zero weights.
-        with torch.no_grad():
-            for block in transformer.blocks:
-                block.adaLN_modulation[1].weight.normal_(std=0.02)
-            transformer.final_adaLN[1].weight.normal_(std=0.02)
-
+        # With additive conditioning, different timesteps immediately produce
+        # different outputs (no zero-init like adaLN-Zero)
         x = torch.randn(1, 100, 256)
         t1 = torch.tensor([0])
         t2 = torch.tensor([500])
