@@ -98,6 +98,11 @@ class Trainer:
         self.config = config
         self.device = torch.device(config.device)
 
+        # Enable anomaly detection for NaN debugging
+        if config.detect_anomaly:
+            torch.autograd.set_detect_anomaly(True)
+            print("Anomaly detection enabled - will show traceback on NaN/Inf")
+
         # Move model to device
         model.to(self.device)
 

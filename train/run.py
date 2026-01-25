@@ -56,6 +56,7 @@ def parse_args():
     parser.add_argument("--device", type=str, default=None, help="Device: cuda or cpu")
     parser.add_argument("--mixed_precision", type=str, default=None, help="Mixed precision: no, fp16, bf16")
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
+    parser.add_argument("--detect_anomaly", action="store_true", help="Enable torch.autograd.set_detect_anomaly for NaN debugging")
 
     # Output settings
     parser.add_argument("--output_dir", type=str, default=None, help="Output directory")
@@ -98,6 +99,8 @@ def build_config(args) -> TrainConfig:
         config.mixed_precision = args.mixed_precision
     if args.seed is not None:
         config.seed = args.seed
+    if args.detect_anomaly:
+        config.detect_anomaly = True
     if args.output_dir is not None:
         config.output_dir = args.output_dir
     if args.resume_from is not None:

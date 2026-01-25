@@ -17,7 +17,7 @@ class DataConfig:
     # Prior dataset settings
     batch_size: int = 56
     batch_size_per_gp: int = 56
-    prior_type: str = "mlp_scm"  # 'mlp_scm', 'tree_scm', 'mix_scm', 'dummy'
+    prior_type: str = "mix_scm"  # 'mlp_scm', 'tree_scm', 'mix_scm', 'dummy'
 
     # Feature settings
     min_features: int = 10
@@ -103,9 +103,9 @@ class TrainConfig:
 
     # Training steps
     max_steps: int = 100000
-    eval_every: int = 1000
-    save_every: int = 5000
-    log_every: int = 100
+    eval_every: int = 500
+    save_every: int = 500
+    log_every: int = 50
 
     # Batch settings
     micro_batch_size: int = 64  # Actual batch size per forward pass
@@ -114,7 +114,7 @@ class TrainConfig:
     # Checkpointing
     output_dir: str = "./outputs"
     resume_from: Optional[str] = None
-    save_total_limit: int = 5
+    save_total_limit: int = 3
 
     # Logging
     project_name: str = "tabular-diffusion"
@@ -125,6 +125,7 @@ class TrainConfig:
     device: str = "cuda"
     seed: int = 42
     mixed_precision: str = "no"  # 'no', 'fp16', 'bf16'
+    detect_anomaly: bool = False  # Enable torch.autograd.set_detect_anomaly for NaN debugging
 
     # DDP settings
     # ddp: bool = False

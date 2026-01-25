@@ -44,7 +44,7 @@ def torch_nanstd(input, dim=None, keepdim=False, ddof=0, *, dtype=None) -> Tenso
     return torch.from_numpy(std).to(dtype=torch.float, device=device)
 
 
-def standard_scaling(input: Tensor, clip_value: float = 100) -> Tensor:
+def standard_scaling(input: Tensor, clip_value: float = 5.0) -> Tensor:
     """Standardizes features by removing the mean and scaling to unit variance.
 
     NaNs are ignored in mean/std calculation.
@@ -54,8 +54,9 @@ def standard_scaling(input: Tensor, clip_value: float = 100) -> Tensor:
     input : Tensor
         Input tensor of shape (T, H), where T is sequence length, H is features.
 
-    clip_value : float, optional, default=100
+    clip_value : float, optional, default=5.0
         The value to clip the standardized input to, preventing extreme outliers.
+        Tighter range (5.0 vs 100) improves numerical stability for diffusion models.
 
     Returns
     -------
@@ -113,6 +114,8 @@ def outlier_removing(input: Tensor, threshold: float = 4.0) -> Tensor:
 
     return input.clamp(min=lower, max=upper)
 
+
+# def normalize_to_range(input: )
 
 def permute_classes(input: Tensor) -> Tensor:
     """Label encoding and permute classes.
@@ -358,7 +361,9 @@ class Reg2Cls(nn.Module):
 
         X = outlier_removing(X, threshold=4)
         X = standard_scaling(X)
-
+        # add a rescale to [-1,1]
+        # X = X / clip_value
+        
         # Permute features if specified
         if self.hp.get("permute_features", True):
             perm = torch.randperm(num_features, device=X.device)
