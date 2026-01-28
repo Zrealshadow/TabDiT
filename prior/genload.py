@@ -235,6 +235,7 @@ class LoadPriorDataset(IterableDataset):
         timeout=60,
         delete_after_load=False,
         device="cpu",
+        verbose=False
     ):
         super().__init__()
         self.data_dir = Path(data_dir)
@@ -246,7 +247,7 @@ class LoadPriorDataset(IterableDataset):
         self.timeout = timeout
         self.delete_after_load = delete_after_load
         self.device = device
-
+        self.verbose = verbose
         # Load metadata if available
         self.metadata = None
         metadata_file = self.data_dir / "metadata.json"
@@ -254,9 +255,17 @@ class LoadPriorDataset(IterableDataset):
             try:
                 with open(metadata_file, "r") as f:
                     self.metadata = json.load(f)
+                    if self.verbose:
+                        print(f"Loaded metadata: {self.metadata}")
             except Exception as e:
                 print(f"Warning: Could not load or parse metadata.json: {e}")
-
+        else:
+            print(f"Warning: metadata.json not found")
+        
+        # Rewrite the batch_size in metadata
+        self.batch_size = self.metadata.get("batch_size", batch_size)
+        if self.verbose:
+            print(f"Rewritten batch_size in metadata: {self.batch_size}")
         # Buffer for storing datasets that haven't been returned yet
         self.buffer_X = None
         self.buffer_y = None
@@ -269,7 +278,7 @@ class LoadPriorDataset(IterableDataset):
         return self
 
     def _load_batch_file(self):
-        """Load a single batch file from disk.
+        """Load a single batch file from disk, assume the batch file exist
 
         Returns
         -------
@@ -278,13 +287,16 @@ class LoadPriorDataset(IterableDataset):
         """
         batch_file = self.data_dir / f"batch_{self.current_idx:06d}.pt"
 
-        # Try loading the file for up to timeout seconds
-        wait_time = 0
-        while not batch_file.exists():
-            if wait_time >= self.timeout:
-                raise RuntimeError(f"Timeout waiting for batch file {batch_file}")
-            time.sleep(5)
-            wait_time += 5
+        if self.verbose:
+            print(f"Loading batch file {batch_file}")
+            
+        # # Try loading the file for up to timeout seconds
+        # wait_time = 0
+        # while not batch_file.exists():
+        #     if wait_time >= self.timeout:
+        #         raise RuntimeError(f"Timeout waiting for batch file {batch_file}")
+        #     time.sleep(5)
+        #     wait_time += 5
 
         batch = torch.load(batch_file, map_location=self.device, weights_only=True)
         X = batch["X"]
@@ -310,6 +322,11 @@ class LoadPriorDataset(IterableDataset):
         self.current_idx += self.ddp_world_size
 
         return X, y, d, seq_lens, train_sizes, batch_size
+    
+    def valid_batch_file(self):
+        batch_file = self.data_dir / f"batch_{self.current_idx:06d}.pt"
+        return batch_file.exists()
+        
 
     def __next__(self):
         """Load datasets until we have at least batch_size, then return exactly batch_size.
@@ -335,7 +352,11 @@ class LoadPriorDataset(IterableDataset):
         # Initialize or use existing buffer
         if self.buffer_size == 0:
             # Load the first batch
+            if not self.valid_batch_file():
+                raise StopIteration
+            
             X, y, d, seq_lens, train_sizes, file_batch_size = self._load_batch_file()
+            print(f"File_batch_size:{file_batch_size}")
             self.buffer_X = X
             self.buffer_y = y
             self.buffer_d = d
@@ -349,37 +370,35 @@ class LoadPriorDataset(IterableDataset):
             if self.max_batches is not None and self.current_idx >= self.max_batches:
                 # If we can't get a full batch, return what we have
                 break
-
-            try:
-                # Load another batch and append to buffer
-                X, y, d, seq_lens, train_sizes, file_batch_size = self._load_batch_file()
-
-                # Concatenate with existing buffer
-                if self.buffer_X is None:
-                    # If buffer is empty, directly assign
-                    self.buffer_X = X
-                    self.buffer_y = y
-                    self.buffer_d = d
-                    self.buffer_seq_lens = seq_lens
-                    self.buffer_train_sizes = train_sizes
-                    self.buffer_size = file_batch_size
-                else:
-                    # Otherwise concatenate, handling SliceNestedTensor if needed
-                    if isinstance(X, SliceNestedTensor):
-                        self.buffer_X = cat_slice_nested_tensors([self.buffer_X, X], dim=0)
-                        self.buffer_y = cat_slice_nested_tensors([self.buffer_y, y], dim=0)
-                    else:
-                        self.buffer_X = torch.cat([self.buffer_X, X], dim=0)
-                        self.buffer_y = torch.cat([self.buffer_y, y], dim=0)
-
-                    self.buffer_d = torch.cat([self.buffer_d, d], dim=0)
-                    self.buffer_seq_lens = torch.cat([self.buffer_seq_lens, seq_lens], dim=0)
-                    self.buffer_train_sizes = torch.cat([self.buffer_train_sizes, train_sizes], dim=0)
-                    self.buffer_size += file_batch_size
-            except Exception as e:
-                # If we can't load more files, use what we have
-                print(f"Warning: Could not load more files: {str(e)}")
+            
+            if not self.valid_batch_file():
                 break
+            
+            # Load another batch and append to buffer
+            X, y, d, seq_lens, train_sizes, file_batch_size = self._load_batch_file()
+
+            # Concatenate with existing buffer
+            if self.buffer_X is None:
+                # If buffer is empty, directly assign
+                self.buffer_X = X
+                self.buffer_y = y
+                self.buffer_d = d
+                self.buffer_seq_lens = seq_lens
+                self.buffer_train_sizes = train_sizes
+                self.buffer_size = file_batch_size
+            else:
+                # Otherwise concatenate, handling SliceNestedTensor if needed
+                if isinstance(X, SliceNestedTensor):
+                    self.buffer_X = cat_slice_nested_tensors([self.buffer_X, X], dim=0)
+                    self.buffer_y = cat_slice_nested_tensors([self.buffer_y, y], dim=0)
+                else:
+                    self.buffer_X = torch.cat([self.buffer_X, X], dim=0)
+                    self.buffer_y = torch.cat([self.buffer_y, y], dim=0)
+
+                self.buffer_d = torch.cat([self.buffer_d, d], dim=0)
+                self.buffer_seq_lens = torch.cat([self.buffer_seq_lens, seq_lens], dim=0)
+                self.buffer_train_sizes = torch.cat([self.buffer_train_sizes, train_sizes], dim=0)
+                self.buffer_size += file_batch_size
 
         # Extract batch_size datasets (or all if we have fewer)
         output_size = min(self.batch_size, self.buffer_size)
@@ -601,7 +620,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="data", help="Directory to save the generated data")
     parser.add_argument("--np_seed", type=int, default=42, help="Random seed for numpy")
     parser.add_argument("--torch_seed", type=int, default=42, help="Random seed for torch")
-    parser.add_argument("--num_batches", type=int, default=10000, help="Number of batches to generate")
+    parser.add_argument("--num_batches", type=int, default=1, help="Number of batches to generate")
     parser.add_argument("--resume_from", type=int, default=0, help="Resume generation from this batch index")
     parser.add_argument("--batch_size", type=int, default=512, help="Total batch size")
     parser.add_argument("--batch_size_per_gp", type=int, default=4, help="Batch size per group")
@@ -637,7 +656,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--prior_type",
         type=str,
-        default="graph_scm",
+        default="mix_scm",
         choices=["mlp_scm", "tree_scm", "mix_scm"],
         help="Type of prior to use",
     )

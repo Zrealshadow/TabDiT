@@ -1029,7 +1029,21 @@ class PriorDataset(IterableDataset):
         train_sizes : Tensor
             Position for train/test split for each dataset of shape (batch_size,).
         """
-        return self.prior.get_batch(batch_size)
+        max_retries = 100
+        for attempt in range(max_retries):
+            X, y, d, seq_lens, train_sizes = self.prior.get_batch(batch_size)
+
+            # Check for NaN values in X and y
+            # Handle both regular Tensor and SliceNestedTensor (which forwards to nested_tensor)
+            X_tensor = X.nested_tensor if hasattr(X, 'nested_tensor') else X
+            y_tensor = y.nested_tensor if hasattr(y, 'nested_tensor') else y
+
+            has_nan = torch.isnan(X_tensor).any() or torch.isnan(y_tensor).any()
+
+            if not has_nan:
+                return X, y, d, seq_lens, train_sizes
+
+        raise RuntimeError(f"Failed to generate a batch without NaN values after {max_retries} attempts")
 
     def __iter__(self) -> "PriorDataset":
         """
