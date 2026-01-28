@@ -301,40 +301,56 @@ class Trainer:
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr
 
-    def get_batch(self):
+    def get_batch(self, max_retries: int = 10):
         """Get next batch from data loader.
+
+        If NaN is detected in the batch, regenerate up to max_retries times.
+
+        Parameters
+        ----------
+        max_retries : int
+            Maximum number of retries if NaN is detected in the batch
 
         Returns
         -------
         tuple
             (X, y, d, seq_lens, train_sizes) tensors on device
         """
-        try:
-            batch = next(self.data_iter)
-        except StopIteration:
-            self.data_iter = iter(self.dataloader)
-            batch = next(self.data_iter)
+        for attempt in range(max_retries):
+            try:
+                batch = next(self.data_iter)
+            except StopIteration:
+                self.data_iter = iter(self.dataloader)
+                batch = next(self.data_iter)
 
-        X, y, d, seq_lens, train_sizes = batch
+            X, y, d, seq_lens, train_sizes = batch
 
-        # NOTE: there we assume one batch share same sampled hyperparameter
-        # so for each element in batch, they share same d/seq_lens/train_sizes
+            # Check for NaN in generated data - regenerate if found
+            if torch.isnan(X).any() or torch.isinf(X).any():
+                print(f"NaN/Inf detected in batch data, regenerating (attempt {attempt + 1}/{max_retries})")
+                continue
 
-        assert (d[0] == d).all(), f"Inconsistent feature counts across batch {str(d.tolist())}"
+            # NOTE: there we assume one batch share same sampled hyperparameter
+            # so for each element in batch, they share same d/seq_lens/train_sizes
 
-        # tailer X to actual_feature from max_features
-        actual_feature = d[0].item()
-        X = X[:, :, : actual_feature]
-        
-        # Move to device
-        X = X.to(self.device)
-        y = y.to(self.device)
-        
-        # d = d.to(self.device)
-        # seq_lens = seq_lens.to(self.device)
-        # train_sizes = train_sizes.to(self.device)
+            assert (d[0] == d).all(), f"Inconsistent feature counts across batch {str(d.tolist())}"
 
-        return X, y, d, seq_lens, train_sizes
+            # tailer X to actual_feature from max_features
+            actual_feature = d[0].item()
+            X = X[:, :, : actual_feature]
+
+            # Move to device
+            X = X.to(self.device)
+            
+            # y = y.to(self.device)
+            # d = d.to(self.device)
+            # seq_lens = seq_lens.to(self.device)
+            # train_sizes = train_sizes.to(self.device)
+
+            return X, y, d, seq_lens, train_sizes
+
+        # If all retries failed, raise an error
+        raise RuntimeError(f"Failed to get valid batch after {max_retries} attempts due to NaN/Inf in data")
 
     def compute_loss(
         self,
@@ -534,8 +550,11 @@ class Trainer:
         torch.save(checkpoint, path)
         print(f"Saved checkpoint to {path}")
 
-        # Keep only last N checkpoints
-        checkpoints = sorted(self.output_dir.glob(f"{name}_step*.pt"))
+        # Keep only last N checkpoints (sort numerically by step number)
+        checkpoints = sorted(
+            self.output_dir.glob(f"{name}_step*.pt"),
+            key=lambda p: int(p.stem.split("_step")[-1])
+        )
         if len(checkpoints) > self.config.save_total_limit:
             for ckpt in checkpoints[:-self.config.save_total_limit]:
                 ckpt.unlink()
